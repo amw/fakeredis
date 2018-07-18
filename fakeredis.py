@@ -546,6 +546,7 @@ class FakeStrictRedis(object):
         self._encoding = charset
         self._encoding_errors = errors
         self._pubsubs = []
+        self._pubsubs_lock = threading.Lock()
         self._decode_responses = decode_responses
         self._lastsave = datetime.now()
         self.connected = connected
@@ -566,7 +567,8 @@ class FakeStrictRedis(object):
         for db in self._dbs.values():
             db.clear()
 
-        del self._pubsubs[:]
+        with self._pubsubs_lock:
+            del self._pubsubs[:]
         return True
 
     def _remove_if_empty(self, key):
@@ -2310,7 +2312,8 @@ class FakeStrictRedis(object):
         """
         ps = FakePubSub(decode_responses=self._decode_responses,
                         ignore_subscribe_messages=ignore_subscribe_messages)
-        self._pubsubs.append(ps)
+        with self._pubsubs_lock:
+            self._pubsubs.append(ps)
 
         return ps
 
@@ -2322,11 +2325,13 @@ class FakeStrictRedis(object):
         """
         count = 0
         for i, ps in list(enumerate(self._pubsubs)):
-            if not ps.subscribed:
-                del self._pubsubs[i]
-                continue
+            if ps.subscribed:
+                count += ps.put(channel, message, 'message')
 
-            count += ps.put(channel, message, 'message')
+        with self._pubsubs_lock:
+            for i, ps in reversed(list(enumerate(self._pubsubs))):
+                if not ps.subscribed:
+                    del self._pubsubs[i]
 
         return count
 
